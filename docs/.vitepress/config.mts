@@ -98,7 +98,16 @@ export default defineConfig({
           { text: 'PGlite API', link: '/docs/api' },
           { text: 'Live Queries', link: '/docs/live-queries' },
           { text: 'Filesystems', link: '/docs/filesystems' },
-          { text: 'Framework Hooks', link: '/docs/framework-hooks' },
+          {
+            text: 'Framework Hooks',
+            link: '/react',
+            base: '/docs/framework-hooks',
+            collapsed: true,
+            items: [
+              { text: 'React', link: '/react' },
+              { text: 'Vue', link: '/vue' },
+            ],
+          },
           { text: 'Multi-tab Worker', link: '/docs/multi-tab-worker' },
           { text: 'REPL Component', link: '/docs/repl' },
           { text: 'ORM Support', link: '/docs/orm-support' },
