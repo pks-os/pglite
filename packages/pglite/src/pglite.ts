@@ -1,7 +1,7 @@
 import { Mutex } from 'async-mutex'
 import PostgresModFactory, { type PostgresMod } from './postgresMod.js'
 import { type Filesystem, parseDataDir, loadFs } from './fs/index.js'
-import { makeLocateFile } from './utils.js'
+import { instantiateWasm, getFsBundle, startWasmDownload } from './utils.js'
 import type {
   DebugLevel,
   PGliteOptions,
@@ -13,11 +13,10 @@ import type {
 import { BasePGlite } from './base.js'
 import { loadExtensionBundle, loadExtensions } from './extensionUtils.js'
 import { loadTar, DumpTarCompressionOptions } from './fs/tarUtils.js'
-
 import { PGDATA, WASM_PREFIX } from './fs/index.js'
 
 // Importing the source as the built version is not ESM compatible
-import { serialize, Parser } from '@electric-sql/pg-protocol'
+import { serialize, Parser as ProtocolParser } from '@electric-sql/pg-protocol'
 import {
   BackendMessage,
   DatabaseError,
@@ -53,7 +52,7 @@ export class PGlite
   #extensions: Extensions
   #extensionsClose: Array<() => Promise<void>> = []
 
-  #parser = new Parser()
+  #protocolParser = new ProtocolParser()
 
   // These are the current ArrayBuffer that is being read or written to
   // during a query, such as COPY FROM or COPY TO.
@@ -180,6 +179,25 @@ export class PGlite
       ...(this.debug ? ['-d', this.debug.toString()] : []),
     ]
 
+    if (!options.wasmModule) {
+      // Start the wasm download in the background so it's ready when we need it
+      startWasmDownload()
+    }
+
+    // Get the fs bundle
+    // We don't await the loading of the fs bundle at this point as we can continue
+    // with other work.
+    // It's resolved value `fsBundleBuffer` is set and used in `getPreloadedPackage`
+    // which is called via `PostgresModFactory` after we have awaited
+    // `fsBundleBufferPromise` below.
+    const fsBundleBufferPromise = options.fsBundle
+      ? options.fsBundle.arrayBuffer()
+      : getFsBundle()
+    let fsBundleBuffer: ArrayBuffer
+    fsBundleBufferPromise.then((buffer) => {
+      fsBundleBuffer = buffer
+    })
+
     let emscriptenOpts: Partial<PostgresMod> = {
       WASM_PREFIX,
       arguments: args,
@@ -188,7 +206,26 @@ export class PGlite
       ...(this.debug > 0
         ? { print: console.info, printErr: console.error }
         : { print: () => {}, printErr: () => {} }),
-      locateFile: await makeLocateFile(),
+      instantiateWasm: (imports, successCallback) => {
+        instantiateWasm(imports, options.wasmModule).then(
+          ({ instance, module }) => {
+            // @ts-ignore wrong type in Emscripten typings
+            successCallback(instance, module)
+          },
+        )
+        return {}
+      },
+      getPreloadedPackage: (remotePackageName, remotePackageSize) => {
+        if (remotePackageName === 'postgres.data') {
+          if (fsBundleBuffer.byteLength !== remotePackageSize) {
+            throw new Error(
+              `Invalid FS bundle size: ${fsBundleBuffer.byteLength} !== ${remotePackageSize}`,
+            )
+          }
+          return fsBundleBuffer
+        }
+        throw new Error(`Unknown package: ${remotePackageName}`)
+      },
       preRun: [
         (mod: any) => {
           // Register /dev/blob device
@@ -293,6 +330,10 @@ export class PGlite
     }
     emscriptenOpts['pg_extensions'] = extensionBundlePromises
 
+    // Await the fs bundle - we do this just before calling PostgresModFactory
+    // as it needs the fs bundle to be ready.
+    await fsBundleBufferPromise
+
     // Load the database engine
     this.mod = await PostgresModFactory(emscriptenOpts)
 
@@ -371,6 +412,9 @@ export class PGlite
 
     // Set the search path to public for this connection
     await this.exec('SET search_path TO public;')
+
+    // Init array types
+    await this._initArrayTypes()
 
     // Init extensions
     for (const initFn of extensionInitFns) {
@@ -543,9 +587,9 @@ export class PGlite
     const data = await this.execProtocolRaw(message, { syncToFs })
     const results: Array<[BackendMessage, Uint8Array]> = []
 
-    this.#parser.parse(data, (msg) => {
+    this.#protocolParser.parse(data, (msg) => {
       if (msg instanceof DatabaseError) {
-        this.#parser = new Parser() // Reset the parser
+        this.#protocolParser = new ProtocolParser() // Reset the parser
         if (throwOnError) {
           throw msg
         }
