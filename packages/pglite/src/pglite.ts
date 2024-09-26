@@ -459,6 +459,7 @@ export class PGlite
     // Close the database
     try {
       await this.execProtocol(serialize.end())
+      this.mod!._pg_shutdown()
     } catch (e) {
       const err = e as { name: string; status: number }
       if (err.name === 'ExitStatus' && err.status === 0) {
@@ -684,7 +685,7 @@ export class PGlite
       this.#notifyListeners.set(channel, new Set())
     }
     this.#notifyListeners.get(channel)!.add(callback)
-    await this.exec(`LISTEN ${channel}`)
+    await this.exec(`LISTEN "${channel}"`)
     return async () => {
       await this.unlisten(channel, callback)
     }
@@ -699,11 +700,11 @@ export class PGlite
     if (callback) {
       this.#notifyListeners.get(channel)?.delete(callback)
       if (this.#notifyListeners.get(channel)?.size === 0) {
-        await this.exec(`UNLISTEN ${channel}`)
+        await this.exec(`UNLISTEN "${channel}"`)
         this.#notifyListeners.delete(channel)
       }
     } else {
-      await this.exec(`UNLISTEN ${channel}`)
+      await this.exec(`UNLISTEN "${channel}"`)
       this.#notifyListeners.delete(channel)
     }
   }
