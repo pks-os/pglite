@@ -9,6 +9,7 @@ import type {
   ExecProtocolOptions,
   PGliteInterfaceExtensions,
   Extensions,
+  ExecProtocolResult,
 } from './interface.js'
 import { BasePGlite } from './base.js'
 import { loadExtensionBundle, loadExtensions } from './extensionUtils.js'
@@ -146,7 +147,7 @@ export class PGlite
             dataDir: dataDirOrPGliteOptions,
             ...(options ?? {}),
           }
-        : dataDirOrPGliteOptions ?? {}
+        : (dataDirOrPGliteOptions ?? {})
 
     const pg = new PGlite(resolvedOpts)
     await pg.waitReady
@@ -588,9 +589,9 @@ export class PGlite
       throwOnError = true,
       onNotice,
     }: ExecProtocolOptions = {},
-  ): Promise<Array<[BackendMessage, Uint8Array]>> {
+  ): Promise<ExecProtocolResult> {
     const data = await this.execProtocolRaw(message, { syncToFs })
-    const results: Array<[BackendMessage, Uint8Array]> = []
+    const results: BackendMessage[] = []
 
     this.#protocolParser.parse(data, (msg) => {
       if (msg instanceof DatabaseError) {
@@ -632,10 +633,10 @@ export class PGlite
           queueMicrotask(() => cb(msg.channel, msg.payload))
         })
       }
-      results.push([msg, data])
+      results.push(msg)
     })
 
-    return results
+    return { messages: results, data }
   }
 
   /**
