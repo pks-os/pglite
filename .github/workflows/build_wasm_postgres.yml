@@ -15,7 +15,6 @@ jobs:
     env:
       BUILD_CONFIG_FILE: .buildconfig
       SDK_ARCHIVE: python3.13-wasm-sdk-Ubuntu-22.04.tar.lz4
-      WASI_SDK_VERSION: 24.0.3
       WASI_SDK_ARCHIVE: python3.13-wasi-sdk-Ubuntu-22.04.tar.lz4
       SDKROOT: /opt/python-wasm-sdk
       SYS_PYTHON: /usr/bin/python3
@@ -26,7 +25,7 @@ jobs:
       OBJDUMP: true
       contrib: contrib
       extra: extra
-      EXTRA_EXT: vector
+      EXTRA_EXT: vector postgis
 
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +47,7 @@ jobs:
             /tmp/sdk/postgres-*.tar.gz
             postgres
             postgresql-*
-          key: build-cache-${{ hashFiles('.buildconfig', 'cibuild.sh', '.github/workflows/build_wasm_postgres.yml', 'package.json', 'cibuild/**', 'patches/*.c', 'patches/*.h', 'patches/**/*.diff') }}
+          key: build-cache-${{ hashFiles('.buildconfig', 'cibuild.sh', '.github/workflows/build_wasm_postgres.yml', 'package.json', 'cibuild/**', 'extra/**', 'patches/*.c', 'patches/*.h', 'patches/**/*.diff') }}
 
       - name: Install python-wasm-sdk for emsdk/wasi+prebuilts
         if: steps.cache-restore.outputs.cache-hit != 'true'

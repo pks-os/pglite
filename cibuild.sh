@@ -6,10 +6,11 @@ export CMA_MB=${CMA_MB:-64}
 
 export CI=${CI:-false}
 
-if $CI
-then
-    . .buildconfig
-fi
+chmod +x ./extra/*.sh cibuild/*.sh
+
+. .buildconfig
+
+export PG_VERSION SDK_VERSION WASI_SDK_VERSION SDKROOT
 
 export PG_VERSION=${PG_VERSION:-16.4}
 export WORKSPACE=${GITHUB_WORKSPACE:-$(pwd)}
@@ -26,7 +27,15 @@ export WASI=${WASI:-false}
 # exit on error
 EOE=false
 
-mkdir -p /tmp/sdk
+
+if ./cibuild/sdk.sh
+then
+    echo "sdk check passed (emscripten)"
+else
+    echo sdk failed
+    exit 44
+fi
+
 
 # the default is a user writeable path.
 if mkdir -p ${PGROOT}/sdk
@@ -369,7 +378,7 @@ then
                 . /etc/lsb-release
                 DISTRIB="${DISTRIB_ID}-${DISTRIB_RELEASE}"
                 CIVER=${CIVER:-$DISTRIB}
-                SDK_URL=https://github.com/pygame-web/python-wasm-sdk-extra/releases/download/$SDK_VERSION/python-emsdk-sdk-extra-${CIVER}.tar.lz4
+                SDK_URL=https://github.com/pygame-web/python-wasm-sdk-extra/releases/download/$SDK_VERSION/python3.13-emsdk-sdk-extra-${CIVER}.tar.lz4
                 echo "Installing $SDK_URL"
                 curl -sL --retry 5 $SDK_URL | tar xvP --use-compress-program=lz4 | pv -p -l -s 15000 >/dev/null
                 chmod +x ./extra/*.sh
@@ -463,8 +472,8 @@ ________________________________________________________________________________
 
                 # debug CI does not use pnpm/npm for building pg, so call the typescript build
                 # part from here
-                pnpm --filter "pglite^..." build || exit 450
-
+                #pnpm --filter "pglite^..." build || exit 450
+                pnpm run build:js || exit 476
                 pnpm pack || exit 31
                 packed=$(echo -n electric-sql-pglite-*.tgz)
 
