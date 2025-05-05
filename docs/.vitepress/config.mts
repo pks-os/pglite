@@ -102,7 +102,7 @@ export default defineConfig({
             text: 'Framework Hooks',
             link: '/react',
             base: '/docs/framework-hooks',
-            collapsed: true,
+            collapsed: false,
             items: [
               { text: 'React', link: '/react' },
               { text: 'Vue', link: '/vue' },
@@ -113,6 +113,7 @@ export default defineConfig({
           { text: 'REPL Component', link: '/docs/repl' },
           { text: 'ORMs & Query Builders', link: '/docs/orm-support' },
           { text: 'Sync using ElectricSQL', link: '/docs/sync' },
+          { text: 'Upgrade v0.2.x -> v0.3.x', link: '/docs/upgrade' },
         ],
       },
       {

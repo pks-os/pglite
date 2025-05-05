@@ -19,7 +19,12 @@ import type {
   PGliteOptions,
 } from './interface.js'
 import PostgresModFactory, { type PostgresMod } from './postgresMod.js'
-import { getFsBundle, instantiateWasm, startWasmDownload } from './utils.js'
+import {
+  getFsBundle,
+  instantiateWasm,
+  startWasmDownload,
+  toPostgresName,
+} from './utils.js'
 
 // Importing the source as the built version is not ESM compatible
 import { Parser as ProtocolParser, serialize } from '@electric-sql/pg-protocol'
@@ -50,6 +55,7 @@ export class PGlite
 
   #queryMutex = new Mutex()
   #transactionMutex = new Mutex()
+  #listenMutex = new Mutex()
   #fsSyncMutex = new Mutex()
   #fsSyncScheduled = false
 
@@ -230,7 +236,7 @@ export class PGlite
         return {}
       },
       getPreloadedPackage: (remotePackageName, remotePackageSize) => {
-        if (remotePackageName === 'postgres.data') {
+        if (remotePackageName === 'pglite.data') {
           if (fsBundleBuffer.byteLength !== remotePackageSize) {
             throw new Error(
               `Invalid FS bundle size: ${fsBundleBuffer.byteLength} !== ${remotePackageSize}`,
@@ -380,7 +386,7 @@ export class PGlite
     await loadExtensions(this.mod, (...args) => this.#log(...args))
 
     // Initialize the database
-    const idb = this.mod._pg_initdb()
+    const idb = this.mod._pgl_initdb()
 
     if (!idb) {
       // This would be a sab worker crash before pg_initdb can be called
@@ -397,7 +403,7 @@ export class PGlite
 
     if (idb & 0b0001) {
       // this would be a wasm crash inside pg_initdb from a sab worker.
-      throw new Error('INITDB failed')
+      throw new Error('INITDB: failed to execute')
     } else if (idb & 0b0010) {
       // initdb was called to init PGDATA if required
       const pguser = options.username ?? 'postgres'
@@ -408,7 +414,9 @@ export class PGlite
           // initdb found db+user, and we switched to that user
         } else {
           // TODO: invalid user for db?
-          throw new Error('Invalid db/user combination')
+          throw new Error(
+            `INITDB: Invalid db ${pgdatabase}/user ${pguser} combination`,
+          )
         }
       } else {
         // initdb has created a new database for us, we can only continue if we are
@@ -416,11 +424,14 @@ export class PGlite
         if (pgdatabase !== 'template1' && pguser !== 'postgres') {
           // throw new Error(`Invalid database ${pgdatabase} requested`);
           throw new Error(
-            'INITDB created a new datadir, but an alternative db/user was requested',
+            `INITDB: created a new datadir ${PGDATA}, but an alternative db ${pgdatabase}/user ${pguser} was requested`,
           )
         }
       }
     }
+
+    // (re)start backed after possible initdb boot/single.
+    this.mod._pgl_backend()
 
     // Sync any changes back to the persisted store (if there is one)
     // TODO: only sync here if initdb did init db.
@@ -477,7 +488,7 @@ export class PGlite
     // Close the database
     try {
       await this.execProtocol(serialize.end())
-      this.mod!._pg_shutdown()
+      this.mod!._pgl_shutdown()
     } catch (e) {
       const err = e as { name: string; status: number }
       if (err.name === 'ExitStatus' && err.status === 0) {
@@ -558,6 +569,7 @@ export class PGlite
   execProtocolRawSync(message: Uint8Array) {
     const msg_len = message.length
     const mod = this.mod!
+    mod._use_wire(1)
     mod._interactive_write(msg_len)
     mod.HEAPU8.set(message, 1)
     mod._interactive_one()
@@ -586,6 +598,7 @@ export class PGlite
     const mod = this.mod!
 
     // >0 set buffer content type to wire protocol
+    mod._use_wire(1)
     // set buffer size so answer will be at size+0x2 pointer addr
     mod._interactive_write(msg_len)
 
@@ -716,13 +729,26 @@ export class PGlite
    * @param callback The callback to call when a notification is received
    */
   async listen(channel: string, callback: (payload: string) => void) {
-    if (!this.#notifyListeners.has(channel)) {
-      this.#notifyListeners.set(channel, new Set())
+    return this._runExclusiveListen(() => this.#listen(channel, callback))
+  }
+
+  async #listen(channel: string, callback: (payload: string) => void) {
+    const pgChannel = toPostgresName(channel)
+    if (!this.#notifyListeners.has(pgChannel)) {
+      this.#notifyListeners.set(pgChannel, new Set())
     }
-    this.#notifyListeners.get(channel)!.add(callback)
-    await this.exec(`LISTEN "${channel}"`)
+    this.#notifyListeners.get(pgChannel)!.add(callback)
+    try {
+      await this.exec(`LISTEN ${channel}`)
+    } catch (e) {
+      this.#notifyListeners.get(pgChannel)!.delete(callback)
+      if (this.#notifyListeners.get(pgChannel)?.size === 0) {
+        this.#notifyListeners.delete(pgChannel)
+      }
+      throw e
+    }
     return async () => {
-      await this.unlisten(channel, callback)
+      await this.unlisten(pgChannel, callback)
     }
   }
 
@@ -732,15 +758,26 @@ export class PGlite
    * @param callback The callback to remove
    */
   async unlisten(channel: string, callback?: (payload: string) => void) {
+    return this._runExclusiveListen(() => this.#unlisten(channel, callback))
+  }
+
+  async #unlisten(channel: string, callback?: (payload: string) => void) {
+    const pgChannel = toPostgresName(channel)
+    const cleanUp = async () => {
+      await this.exec(`UNLISTEN ${channel}`)
+      // While that query was running, another query might have subscribed
+      // so we need to check again
+      if (this.#notifyListeners.get(pgChannel)?.size === 0) {
+        this.#notifyListeners.delete(pgChannel)
+      }
+    }
     if (callback) {
-      this.#notifyListeners.get(channel)?.delete(callback)
-      if (this.#notifyListeners.get(channel)?.size === 0) {
-        await this.exec(`UNLISTEN "${channel}"`)
-        this.#notifyListeners.delete(channel)
+      this.#notifyListeners.get(pgChannel)?.delete(callback)
+      if (this.#notifyListeners.get(pgChannel)?.size === 0) {
+        await cleanUp()
       }
     } else {
-      await this.exec(`UNLISTEN "${channel}"`)
-      this.#notifyListeners.delete(channel)
+      await cleanUp()
     }
   }
 
@@ -793,5 +830,14 @@ export class PGlite
    */
   _runExclusiveTransaction<T>(fn: () => Promise<T>): Promise<T> {
     return this.#transactionMutex.runExclusive(fn)
+  }
+
+  async clone(): Promise<PGliteInterface> {
+    const dump = await this.dumpDataDir('none')
+    return PGlite.create({ loadDataDir: dump })
+  }
+
+  _runExclusiveListen<T>(fn: () => Promise<T>): Promise<T> {
+    return this.#listenMutex.runExclusive(fn)
   }
 }

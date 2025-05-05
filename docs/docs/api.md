@@ -269,6 +269,8 @@ const unsub = await pg.listen('test', (payload) => {
 await pg.query("NOTIFY test, 'Hello, world!'")
 ```
 
+Channel names are case sensitive if double-quoted (`pg.listen('"TeST"')`). Otherwise channel name will be lower cased (`pg.listen('TeStiNG')` == `pg.listen('testing')`).
+
 ### unlisten
 
 `.unlisten(channel: string, callback?: (payload: string) => void): Promise<void>`
@@ -360,6 +362,12 @@ await pg.describeQuery('SELECT * FROM test WHERE name = $1', ['test'])
   resultFields: [{ name: "id", dataTypeID: 23, parser: Function }],
 }
 ```
+
+### clone
+
+`.clone(): Promise<PGlite>`
+
+Clones the current instance. This is useful when a series of operations, like unit or integration test, need to be run on the same database without having to recreate the database each time, or for each test.
 
 ## Properties
 

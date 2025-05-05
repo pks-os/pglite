@@ -1,5 +1,45 @@
 # @electric-sql/pglite-sync
 
+## 0.3.2
+
+### Patch Changes
+
+- 317fd36: Specify a peer dependency range on @electric-sql/pglite
+- Updated dependencies [97e52f7]
+- Updated dependencies [4356024]
+- Updated dependencies [0033bc7]
+  - @electric-sql/pglite@0.3.0
+
+## 0.3.1
+
+### Patch Changes
+
+- 3ee6846: New `initialInsertMethod` option that can specify `insert`, `csv` or `json` as the method used to handle the initial sync. The supersedes the `useCopy` option which is now deprecated and will be removed in a future version.
+
+## 0.3.0
+
+### Minor Changes
+
+- f50b5f8: Support for multi shape transactional sync via a new `syncShapesToTables` api. This ensures that all changes from Postgres that were part of the same transaction are applied together as a single transaction to the local PGlite database.
+
+  Note: The `commitGranularity` and `commitThrottle` options have been removed due to incompatibility with the new transactional sync mechanism.
+
+## 0.2.20
+
+### Patch Changes
+
+- c489ec0: Correctly persist the offset during initial sync
+
+## 0.2.19
+
+### Patch Changes
+
+- 67bf759: shapeKey in syncShapeToTable is now mandatory but nullable; passing null will not persist the shape
+- b3640ee: Update the sync plugin to work with the latest Electric sync server
+- Updated dependencies [6bdd74e]
+- Updated dependencies [f94d591]
+  - @electric-sql/pglite@0.2.17
+
 ## 0.2.18
 
 ### Patch Changes

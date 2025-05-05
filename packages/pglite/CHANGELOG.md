@@ -1,5 +1,23 @@
 # @electric-sql/pglite
 
+## 0.3.0
+
+### Minor Changes
+
+- 97e52f7: upgrade to postgresql 17.4
+
+### Patch Changes
+
+- 4356024: bug fix live plugin when dealing with case sensitive table names
+- 0033bc7: Fix a race condition in live query unsubscription that could result in live queries failing to update.
+
+## 0.2.17
+
+### Patch Changes
+
+- 6bdd74e: listen and unlisten case sensitivity behaviour aligned to default PostgreSQL behaviour'
+- f94d591: added clone() method to pglite API. clones an instance such that it can be reused (for example running tests on existing data without readding all data)
+
 ## 0.2.16
 
 ### Patch Changes

@@ -14,6 +14,21 @@ describe('pgDump', () => {
     expect(content).toContain('PostgreSQL database dump')
   })
 
+  it('should dump an empty database multiple times', async () => {
+    const pg = await PGlite.create()
+
+    for (let i = 0; i < 5; i++) {
+      const fileName = `dump_${i}.sql`
+      const dump = await pgDump({ pg, fileName })
+
+      expect(dump).toBeInstanceOf(File)
+      expect(dump.name).toBe(fileName)
+
+      const content = await dump.text()
+      expect(content).toContain('PostgreSQL database dump')
+    }
+  })
+
   it('should dump a database with tables and data', async () => {
     const pg = await PGlite.create()
 
@@ -92,5 +107,19 @@ describe('pgDump', () => {
     expect(result.rows).toHaveLength(2)
     expect(result.rows[0].name).toBe('row1')
     expect(result.rows[1].name).toBe('row2')
+  })
+
+  it('pg_dump should not change SEARCH_PATH', async () => {
+    const pg = await PGlite.create()
+
+    await pg.exec(`SET SEARCH_PATH = amigo;`)
+    const initialSearchPath = await pg.query('SHOW SEARCH_PATH;')
+
+    const dump = await pgDump({ pg })
+    await dump.text()
+
+    const finalSearchPath = await pg.query('SHOW SEARCH_PATH;')
+
+    expect(initialSearchPath).toEqual(finalSearchPath)
   })
 })
